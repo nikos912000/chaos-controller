@@ -212,7 +212,7 @@ func (r *DisruptionReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) 
 // - an instance with at least one chaos pod as "ready" is considered as "partially injected"
 // - an instance with no ready chaos pods is considered as "not injected"
 func (r *DisruptionReconciler) updateInjectionStatus(instance *chaosv1beta1.Disruption) (bool, error) {
-	r.log.Infow("updating injection status")
+	r.log.Infow("updating injection status", "previousStatus", instance.Status.InjectionStatus)
 
 	status := chaostypes.DisruptionInjectionStatusNotInjected
 	allReady := true
@@ -251,9 +251,15 @@ func (r *DisruptionReconciler) updateInjectionStatus(instance *chaosv1beta1.Disr
 		}
 
 		// consider the disruption as fully injected when all pods are ready
+		// if all pods are not ready, but used to be, we consider the disruption in an unknown state
+		// cleaned chaos pods would have been removed, thus we don't know if the disruption is cleaned or not
+		// this will overwrite what would be a valid PartiallyInjected calculation if we increased our number of chaos pods
 		if allReady {
 			status = chaostypes.DisruptionInjectionStatusInjected
+		} else if instance.Status.InjectionStatus == chaostypes.DisruptionInjectionStatusInjected {
+			status = chaostypes.DisruptionInjectionStatusPreviouslyInjected
 		}
+
 	}
 
 	// update instance status

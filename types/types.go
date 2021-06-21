@@ -46,6 +46,8 @@ const (
 	DisruptionInjectionStatusPartiallyInjected DisruptionInjectionStatus = "PartiallyInjected"
 	// DisruptionInjectionStatusInjected is the value of the injection status of a fully injected disruption
 	DisruptionInjectionStatusInjected DisruptionInjectionStatus = "Injected"
+	// DisruptionInjectionStatusPreviouslyInjected is the value of the injection status of a disruption whose chaos pods were Ready but have left that state without being cleaned
+	DisruptionInjectionStatusPreviouslyInjected DisruptionInjectionStatus = "PreviouslyInjectedNowUnknown"
 
 	// DisruptionNameLabel is the label used to identify the disruption name for a chaos pod. This is used to determine pod ownership.
 	DisruptionNameLabel = "chaos.datadoghq.com/disruption-name"
