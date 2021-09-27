@@ -20,14 +20,14 @@ stages:
 
 # Slack Notify Base
 .slack-notifier-base:
+  stage: notify
   tags: [ "runner:main", "size:large" ]
   image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/slack-notifier:latest
   allow_failure: true
-  when: on_failure
-  stage: notify
+  when: on_success
   script:
     - BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
-    - 'MESSAGE_TEXT=":siren: | The $CI_JOB_STAGE Job Failed in the Pipeline CI_PIPELINE_NAME Failed | [ $CI_PROJECT_NAME ][ $CI_COMMIT_REF_NAME ] [ <$BUILD_URL|$CI_PIPELINE_ID> ]   :siren:"'
+    - 'MESSAGE_TEXT=":siren: | A Job in the $CI_PIPELINE_NAME Pipeline $CI_JOB_RESULTS | [ $CI_PROJECT_NAME ][ $CI_COMMIT_REF_NAME ] [ <$BUILD_URL|$CI_PIPELINE_ID> ]   :siren:"'
     - postmessage "#test-chaosnotifier2" "$MESSAGE_TEXT"
 
 # CI image
@@ -63,6 +63,17 @@ build:make:
       - bin/manager/manager
       - bin/handler/handler
 
+build:slack-notifier:
+  stage: build
+  when: always
+  tags: [ "runner:main", "size:large" ]
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/slack-notifier:latest
+  script:
+    - echo "Pushing Slack Notifier Script as an Artifact..."
+  artifacts:
+    paths:
+      - .
+
 # meta-release
 # release image and common stuff
 .meta-release: &meta-release
@@ -71,9 +82,10 @@ build:make:
     - "runner:docker"
   image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker-push:v2875076-79d562c-1.4.0
   before_script:
-    - echo "Logging into the Docker Hub"
-    - DOCKER_REGISTRY_LOGIN=$(aws ssm get-parameter --region us-east-1 --name ci.chaos-engineering.docker_hub_login --with-decryption --query "Parameter.Value" --out text)
-    - aws ssm get-parameter --region us-east-1 --name ci.chaos-engineering.docker_hub_pwd --with-decryption --query "Parameter.Value" --out text | docker login --username "$DOCKER_REGISTRY_LOGIN" --password-stdin docker.io
+    - echo $(date +%s) > .ci_status/prerelease_success
+    #- echo "Logging into the Docker Hub"
+    #- DOCKER_REGISTRY_LOGIN=$(aws ssm get-parameter --region us-east-1 --name ci.chaos-engineering.docker_hub_login --with-decryption --query "Parameter.Value" --out text)
+    #- aws ssm get-parameter --region us-east-1 --name ci.chaos-engineering.docker_hub_pwd --with-decryption --query "Parameter.Value" --out text | docker login --username "$DOCKER_REGISTRY_LOGIN" --password-stdin docker.io
 
 # pre-release
 # build the target from the local Dockerfile and push it to
@@ -82,11 +94,21 @@ build:make:
   <<: *meta-release
   stage: pre-release
   script:
-    - release.sh --build-from=./bin/manager/Dockerfile --build-context=./bin/manager/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${CONTROLLER_IMAGE_NAME} ${TAG}
-    - release.sh --build-from=./bin/injector/Dockerfile --build-context=./bin/injector/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${INJECTOR_IMAGE_NAME} ${TAG}
-    - release.sh --build-from=./bin/handler/Dockerfile --build-context=./bin/handler/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${HANDLER_IMAGE_NAME} ${TAG}
+    #- exit 1
+    #- release.sh --build-from=./bin/manager/Dockerfile --build-context=./bin/manager/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${CONTROLLER_IMAGE_NAME} ${TAG}
+    #- release.sh --build-from=./bin/injector/Dockerfile --build-context=./bin/injector/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${INJECTOR_IMAGE_NAME} ${TAG}
+    #- release.sh --build-from=./bin/handler/Dockerfile --build-context=./bin/handler/ 727006795293.dkr.ecr.us-east-1.amazonaws.com/${HANDLER_IMAGE_NAME} ${TAG}
+    - echo $(date +%s) > .ci_status/prerelease_success
+  after_script:
+    - BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
+    - 'MESSAGE_TEXT=":siren: | A Job in the $CI_PIPELINE_NAME Pipeline $CI_JOB_RESULTS | [ $CI_PROJECT_NAME ][ $CI_COMMIT_REF_NAME ] [ <$BUILD_URL|$CI_PIPELINE_ID> ]  :siren:"'
+    - if [[ -f .ci_status/prerelease_success ]]; then echo postmessage "#test-chaosnotifier2" "$MESSAGE_TEXT" ; fi
+  artifacts:
+    paths:
+      - .ci_status/
   dependencies:
     - build:make
+    - build:slack-notifier
 
 # pre-release-ref
 # build a reference image tag for controller images
@@ -204,30 +226,50 @@ release-docker-hub-tag:
   variables:
     TAG: "${CI_COMMIT_TAG}"
 
+# notify slack when the pre-release job fails
 slack-notifier-pre-release.on-failure:
-  extends: .slack-notifier-base
+  tags: [ "runner:main", "size:large" ]
+  stage: pre-release
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/slack-notifier:latest
+  allow_failure: true
+  script:
+    - if [[ -f .ci_status/prerelease_success ]]; then echo "Success Confirmed"; fi
+    #- BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
+    #- 'MESSAGE_TEXT=":siren: | A Job in the $CI_PIPELINE_NAME Pipeline $CI_JOB_RESULTS | [ $CI_PROJECT_NAME ][ $CI_COMMIT_REF_NAME ] [ <$BUILD_URL|$CI_PIPELINE_ID> ]   :siren:"'
+    #- postmessage "#test-chaosnotifier2" "$MESSAGE_TEXT"
   variables:
     CI_PIPELINE_NAME: "Pre-Release"
-  needs: ["pre-release-ref"]
+  #needs: ["pre-release-ref"]
 
+# notify slack when the release related jobs fail
 slack-notifier-release-controller.on-failure:
   extends: .slack-notifier-base
   variables:
     CI_PIPELINE_NAME: "Release"
   needs: ["release-controller-ref"]
+  only:
+    - main
+    - tags
 
 slack-notifier-release-handler.on-failure:
   extends: .slack-notifier-base
   variables:
     CI_PIPELINE_NAME: "Release"
   needs: ["release-handler-ref"]
+  only:
+    - main
+    - tags
 
 slack-notifier-release-injector.on-failure:
   extends: .slack-notifier-base
   variables:
     CI_PIPELINE_NAME: "Release"
   needs: ["release-injector-ref"]
+  only:
+    - main
+    - tags
 
+# notify slack when the build job fails ONLY on the main and tags branches
 slack-notifier-build.on-failure:
   extends: .slack-notifier-base
   variables:
